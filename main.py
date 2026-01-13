@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer
+from fastapi.security.http import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta
 import sqlite3
@@ -353,7 +354,7 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"JWT verification failed: {e}")
         return None
 
-async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> Dict[str, Any]:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
     """Get the current authenticated user from JWT token"""
     token = credentials.credentials
     user = verify_token(token)
