@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.security.http import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sqlite3
 from typing import List, Optional, Dict, Any
 from enum import Enum
@@ -30,7 +30,10 @@ logger = logging.getLogger(__name__)
 
 # Environment configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "expenses.db")
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = "dev-secret-key-change-in-production"
+    logger.warning("SECRET_KEY not set in environment! Using default key - DO NOT USE IN PRODUCTION!")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
@@ -335,9 +338,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     """Create a JWT access token"""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -679,15 +682,17 @@ async def update_user(
             cursor = conn.cursor()
             
             # Build update query dynamically based on provided fields
+            # Using whitelist approach for security
+            allowed_fields = {"name": "name = ?", "monthly_budget": "monthly_budget = ?"}
             update_fields = []
             values = []
             
             if user_update.name is not None:
-                update_fields.append("name = ?")
+                update_fields.append(allowed_fields["name"])
                 values.append(user_update.name)
             
             if user_update.monthly_budget is not None:
-                update_fields.append("monthly_budget = ?")
+                update_fields.append(allowed_fields["monthly_budget"])
                 values.append(user_update.monthly_budget)
             
             if not update_fields:
@@ -894,24 +899,30 @@ async def update_expense(
                     detail="Access forbidden - you can only update your own expenses"
                 )
             
-            # Build update query dynamically
+            # Build update query dynamically using whitelist approach for security
+            allowed_fields = {
+                "category": "category = ?",
+                "amount": "amount = ?",
+                "description": "description = ?",
+                "date": "date = ?"
+            }
             update_fields = []
             values = []
             
             if expense_update.category is not None:
-                update_fields.append("category = ?")
+                update_fields.append(allowed_fields["category"])
                 values.append(expense_update.category.value)
             
             if expense_update.amount is not None:
-                update_fields.append("amount = ?")
+                update_fields.append(allowed_fields["amount"])
                 values.append(expense_update.amount)
             
             if expense_update.description is not None:
-                update_fields.append("description = ?")
+                update_fields.append(allowed_fields["description"])
                 values.append(expense_update.description)
             
             if expense_update.date is not None:
-                update_fields.append("date = ?")
+                update_fields.append(allowed_fields["date"])
                 values.append(expense_update.date)
             
             if not update_fields:
@@ -1041,13 +1052,19 @@ async def get_analytics(
             total_spent = sum([b['total'] for b in breakdown])
             avg_daily = total_spent / days if days > 0 else 0
             
+            # Calculate budget remaining - handle edge cases
+            if days > 0:
+                budget_remaining = user[0] - (total_spent / (days / 30))
+            else:
+                budget_remaining = user[0]
+            
             return {
                 'user_id': user_id,
                 'period_days': days,
                 'total_spent': total_spent,
                 'average_daily': avg_daily,
                 'monthly_budget': user[0],
-                'budget_remaining': user[0] - (total_spent / (days / 30)),
+                'budget_remaining': budget_remaining,
                 'by_category': breakdown,
                 'daily_breakdown': daily_spending
             }
