@@ -1,13 +1,14 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, validator, EmailStr
-from datetime import datetime, timedelta
+from pydantic import BaseModel, field_validator, EmailStr
+from datetime import datetime, timedelta, timezone
 import sqlite3
 from typing import List, Optional
 from enum import Enum
 import json
 import os
+import secrets
 from contextlib import contextmanager
 import logging
 from passlib.context import CryptContext
@@ -29,7 +30,10 @@ logger = logging.getLogger(__name__)
 
 # Environment configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "expenses.db")
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(32)
+    logger.warning("SECRET_KEY not set in environment. Using auto-generated key. Set SECRET_KEY in production!")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
@@ -142,7 +146,8 @@ class UserRegister(BaseModel):
     monthly_budget: float = 50000
     password: str
     
-    @validator('monthly_budget')
+    @field_validator('monthly_budget')
+    @classmethod
     def budget_must_be_positive(cls, v):
         if v <= 0:
             raise ValueError('Monthly budget must be positive')
@@ -153,7 +158,8 @@ class User(BaseModel):
     name: str
     monthly_budget: float = 50000
     
-    @validator('monthly_budget')
+    @field_validator('monthly_budget')
+    @classmethod
     def budget_must_be_positive(cls, v):
         if v <= 0:
             raise ValueError('Monthly budget must be positive')
@@ -178,13 +184,15 @@ class Expense(BaseModel):
     description: str = ""
     date: Optional[str] = None
     
-    @validator('amount')
+    @field_validator('amount')
+    @classmethod
     def amount_must_be_positive(cls, v):
         if v <= 0:
             raise ValueError('Amount must be positive')
         return v
     
-    @validator('date')
+    @field_validator('date')
+    @classmethod
     def validate_date_format(cls, v):
         if v is not None:
             try:
@@ -219,9 +227,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create JWT access token"""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
