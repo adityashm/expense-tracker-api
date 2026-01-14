@@ -202,7 +202,6 @@ class Expense(BaseModel):
         return v
 
 class BudgetSet(BaseModel):
-    user_id: int
     category: ExpenseCategory
     limit_amount: float
 
